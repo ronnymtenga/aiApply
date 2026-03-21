@@ -15,3 +15,11 @@ inputs/templates/*
 !inputs/templates/.gitkeep
 inputs/job_postings/*
 !inputs/job_postings/.gitkeep
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.pdf
+ *.toc
+ *.synctex.gz
