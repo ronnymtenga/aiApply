@@ -1,6 +1,6 @@
 # AI Apply — Job Application Pipeline
 
-A CLI tool that generates tailored resumes and cover letters using an AI-powered 4-phase assembly line.
+A CLI tool that generates tailored resumes and cover letters using an AI-powered 4-phase assembly line. Now with **LaTeX Template Support**.
 
 ## How It Works
 
@@ -21,41 +21,45 @@ A CLI tool that generates tailored resumes and cover letters using an AI-powered
 ### 1. Install dependencies
 
 ```bash
+# Node dependencies
 npm install
+
+# System dependencies (Optional: for PDF auto-compilation)
+# Arch: sudo pacman -S texlive-basic texlive-latexextra texlive-fontsrecommended
+# Ubuntu: sudo apt install texlive-latex-base texlive-fonts-recommended
 ```
 
 ### 2. Set up your API key
 
 ```bash
 cp .env.example .env
-# Edit .env and add your Anthropic API key
+# Edit .env and add your GOOGLE_GENERATIVE_AI_API_KEY
 ```
 
 ### 3. Add your inputs
 
+The pipeline supports both **Markdown** and **PDF** samples.
+
 ```
 inputs/
-├── profile.json              ← Auto-extracted from samples, or edit manually
-├── golden_samples/           ← Drop past cover letters / resumes here
-│   └── example_cover_letter.md
+├── profile.json              ← Auto-extracted from resumes, or edit manually
+├── resumes/                 ← Drop your past PDF/MD resumes here
+├── cover_letters/           ← Drop your past PDF/MD cover letters here
+├── templates/               ← (Optional) Drop a resume.tex here for LaTeX output
 └── job_postings/             ← Saved here automatically when using URLs
-    └── example_job.md
 ```
+
+#### LaTeX Templates (Option B)
+If you provide `inputs/templates/resume.tex`, the tool will look for variables like `{{SUMMARY}}`, `{{EXPERIENCE}}`, or `{{SKILLS}}` and inject tailored LaTeX code directly into your blueprint.
 
 ### 4. Run the pipeline
 
 ```bash
-# Dry-run (validates inputs, no LLM calls, no API key needed)
-npx tsx src/index.ts --job example_job.md --dry-run
+# Full run with a URL and specific provider
+npm run dev -- --job https://linkedin.com/jobs/view/12345 --provider google
 
-# Full run with a local file
-npx tsx src/index.ts --job example_job.md
-
-# Full run with a URL (fetches and saves the posting automatically)
-npx tsx src/index.ts --job https://boards.greenhouse.io/stripe/jobs/12345
-
-# Skip calibration if you've already run it (reuses cached voice profile)
-npx tsx src/index.ts --job example_job.md --skip-calibration
+# Skip calibration (uses cached voice profile in state/author_style.json)
+npm run dev -- --job example_job.md --skip-calibration
 ```
 
 ### 5. Check your outputs
@@ -63,34 +67,16 @@ npx tsx src/index.ts --job example_job.md --skip-calibration
 ```
 outputs/
 ├── cover_letter.md     ← Your tailored cover letter
-└── resume.md           ← Your tailored resume content
-
-state/                  ← Intermediate files (for debugging)
-├── author_style.json
-├── job_context.json
-└── tailoring_strategy.json
-```
-
-## Project Structure
-
-```
-src/
-├── index.ts              ← Orchestrator (CLI entry point)
-├── schemas.ts            ← Zod schemas for all JSON contracts
-├── agents/
-│   ├── calibration.ts    ← Phase 0 — voice/style + profile extraction
-│   ├── ingestion.ts      ← Phase 1 — job description parsing
-│   ├── strategy.ts       ← Phase 2 — tailoring strategy
-│   └── generation.ts     ← Phase 3 — cover letter + resume
-└── utils/
-    ├── llm.ts            ← Shared LLM call helper
-    └── scraper.ts        ← URL → Markdown fetcher (Jina AI Reader)
+├── resume.md           ← Your tailored resume (Markdown)
+└── resume.tex          ← Your tailored resume (LaTeX)
+└── resume.pdf          ← Your final PDF (Auto-generated if pdflatex is installed)
 ```
 
 ## CLI Options
 
 | Flag | Description |
 |------|-------------|
-| `--job <source>` | **Required.** Job posting URL (`https://...`) or filename in `inputs/job_postings/` |
-| `--skip-calibration` | Skip Phase 0 if `state/author_style.json` already exists |
-| `--dry-run` | Validate all inputs and schemas without making LLM calls |
+| `--job <source>` | **Required.** Job posting URL or filename in `inputs/job_postings/` |
+| `--provider <name>`| LLM provider: `google` (default), `anthropic`, or `openai` |
+| `--skip-calibration`| Skip Phase 0 if `state/author_style.json` already exists |
+| `--dry-run` | Validate inputs without making LLM calls |
