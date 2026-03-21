@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { PDFParse } from "pdf-parse";
 import { callLLM } from "../utils/llm.js";
 import {
   AuthorStyleSchema,
@@ -61,7 +62,7 @@ CRITICAL RULES:
 /**
  * Read and concatenate all golden sample files.
  */
-function loadSamples(samplesDir: string): { userContent: string; count: number } {
+async function loadSamples(samplesDir: string): Promise<{ userContent: string; count: number }> {
   const files = fs
     .readdirSync(samplesDir)
     .filter((f) => !f.startsWith("."));
@@ -74,7 +75,19 @@ function loadSamples(samplesDir: string): { userContent: string; count: number }
 
   const samples: string[] = [];
   for (const file of files) {
-    const content = fs.readFileSync(path.join(samplesDir, file), "utf-8");
+    const filePath = path.join(samplesDir, file);
+    let content: string;
+
+    if (file.toLowerCase().endsWith(".pdf")) {
+      const buffer = fs.readFileSync(filePath);
+      const parser = new PDFParse({ data: new Uint8Array(buffer) });
+      const result = await parser.getText();
+      content = result.text;
+      await parser.destroy();
+    } else {
+      content = fs.readFileSync(filePath, "utf-8");
+    }
+
     samples.push(`--- Sample: ${file} ---\n${content}`);
     console.log(`  📄 Loaded sample: ${file}`);
   }
@@ -94,7 +107,7 @@ export async function runCalibration(
 ): Promise<AuthorStyle> {
   console.log("\n📐 Phase 0a: Calibration — Extracting your writing voice...\n");
 
-  const { userContent, count } = loadSamples(samplesDir);
+  const { userContent, count } = await loadSamples(samplesDir);
 
   console.log(`  🤖 Analyzing ${count} sample(s) for writing style...`);
 
@@ -131,7 +144,7 @@ export async function runProfileExtraction(
 ): Promise<UserProfile> {
   console.log("\n👤 Phase 0b: Profile Extraction — Building your profile from samples...\n");
 
-  const { userContent, count } = loadSamples(samplesDir);
+  const { userContent, count } = await loadSamples(samplesDir);
 
   console.log(`  🤖 Extracting professional data from ${count} sample(s)...`);
 
