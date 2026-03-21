@@ -5,6 +5,8 @@ import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { exec } from "node:child_process";
+import util from "node:util";
 
 import { runCalibration, runProfileExtraction } from "./agents/calibration.js";
 import { runIngestion } from "./agents/ingestion.js";
@@ -21,8 +23,10 @@ const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 const INPUTS_DIR = path.join(PROJECT_ROOT, "inputs");
-const GOLDEN_SAMPLES_DIR = path.join(INPUTS_DIR, "golden_samples");
+const RESUMES_DIR = path.join(INPUTS_DIR, "resumes");
+const COVER_LETTERS_DIR = path.join(INPUTS_DIR, "cover_letters");
 const JOB_POSTINGS_DIR = path.join(INPUTS_DIR, "job_postings");
+const TEMPLATES_DIR = path.join(INPUTS_DIR, "templates");
 const PROFILE_FILE = path.join(INPUTS_DIR, "profile.json");
 const STATE_DIR = path.join(PROJECT_ROOT, "state");
 const OUTPUTS_DIR = path.join(PROJECT_ROOT, "outputs");
@@ -95,15 +99,19 @@ async function main() {
   let needsProfileExtraction = !profileExists;
 
   // Check golden samples
-  const sampleFiles = fs
-    .readdirSync(GOLDEN_SAMPLES_DIR)
-    .filter((f) => !f.startsWith("."));
-  console.log(`✅ Golden samples: ${sampleFiles.length} file(s)`);
+  let resumesCount = 0;
+  let coverLettersCount = 0;
+  if (fs.existsSync(RESUMES_DIR)) {
+    resumesCount = fs.readdirSync(RESUMES_DIR).filter((f) => !f.startsWith(".")).length;
+  }
+  if (fs.existsSync(COVER_LETTERS_DIR)) {
+    coverLettersCount = fs.readdirSync(COVER_LETTERS_DIR).filter((f) => !f.startsWith(".")).length;
+  }
 
-  if (!profileExists && sampleFiles.length === 0) {
-    console.error(`\n❌ No profile.json and no golden samples found.`);
+  if (!profileExists && resumesCount === 0) {
+    console.error(`\n❌ No profile.json and no resumes found in inputs/resumes/.`);
     console.error(`   Either create inputs/profile.json manually,`);
-    console.error(`   or drop past resumes/cover letters into inputs/golden_samples/`);
+    console.error(`   or drop past resumes into inputs/resumes/`);
     process.exit(1);
   }
 
@@ -158,7 +166,7 @@ async function main() {
   // ── Phase 0b: Profile Extraction (if needed) ─────────────────────────
   if (needsProfileExtraction) {
     profile = await runProfileExtraction(
-      GOLDEN_SAMPLES_DIR,
+      RESUMES_DIR,
       PROFILE_FILE,
       STATE_DIR
     );
@@ -172,8 +180,26 @@ async function main() {
   if (opts.skipCalibration && fs.existsSync(authorStylePath)) {
     console.log("\n⏭️  Skipping Phase 0a (using cached author_style.json)");
     authorStyle = JSON.parse(fs.readFileSync(authorStylePath, "utf-8"));
+  } else if (coverLettersCount > 0) {
+    authorStyle = await runCalibration(COVER_LETTERS_DIR, STATE_DIR);
   } else {
-    authorStyle = await runCalibration(GOLDEN_SAMPLES_DIR, STATE_DIR);
+    console.log("\n📐 Phase 0a: Calibration — No cover letters found. Using default professional style...");
+    authorStyle = {
+      voice_profile: {
+        tone: "Professional and confident",
+        sentence_structure: "Clear, action-oriented sentences",
+        vocabulary_level: "Standard professional vocabulary",
+        formatting_quirks: "Standard bullet points",
+        common_transitions: "Additionally, Furthermore",
+        forbidden_words: "None"
+      },
+      resume_structure_preferences: {
+        bullet_style: "STAR method, action-verb first",
+        section_ordering: "Standard (Experience, Education, Skills)",
+        metric_usage: "Used to quantify achievements",
+        density: "Balanced and scannable"
+      }
+    };
   }
 
   // ── Phase 1: Ingestion ────────────────────────────────────────────────
@@ -188,11 +214,38 @@ async function main() {
     STATE_DIR
   );
 
+  const resumeTemplatePath = path.join(TEMPLATES_DIR, "resume.tex");
+  const hasTemplate = fs.existsSync(resumeTemplatePath);
+
   // ── Phase 3: Generation ───────────────────────────────────────────────
-  await runGeneration(strategy, authorStyle, profile!, jobContext, OUTPUTS_DIR);
+  await runGeneration(
+    strategy, 
+    authorStyle, 
+    profile!, 
+    jobContext, 
+    OUTPUTS_DIR,
+    hasTemplate ? resumeTemplatePath : undefined
+  );
 
   // ── Done ──────────────────────────────────────────────────────────────
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+  if (hasTemplate && fs.existsSync(path.join(OUTPUTS_DIR, "resume.tex"))) {
+    console.log(`\n📄 Attempting to compile LaTeX to PDF...`);
+    const execAsync = util.promisify(exec);
+    try {
+      await execAsync(`pdflatex -interaction=nonstopmode -output-directory=${OUTPUTS_DIR} ${path.join(OUTPUTS_DIR, "resume.tex")}`);
+      console.log(`  ✅ Successfully compiled → outputs/resume.pdf`);
+      
+      const auxExts = [".aux", ".log", ".out"];
+      for (const ext of auxExts) {
+        const auxFile = path.join(OUTPUTS_DIR, `resume${ext}`);
+        if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
+      }
+    } catch (err: any) {
+      console.log(`  ℹ️  Could not auto-compile LaTeX. You may need to compile outputs/resume.tex manually.`);
+    }
+  }
 
   console.log("\n╔══════════════════════════════════════════════╗");
   console.log("║          ✅  Pipeline Complete!              ║");

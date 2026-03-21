@@ -164,6 +164,12 @@ export const GenerationOutputSchema = z.object({
     .describe(
       "The full resume content in structured Markdown, tailored for the target role"
     ),
+  template_variables: z
+    .record(z.string())
+    .optional()
+    .describe(
+      "If a LaTeX template is provided, an object mapping exact variable names (e.g. 'SUMMARY') to their tailored LaTeX block."
+    ),
 });
 
 export type GenerationOutput = z.infer<typeof GenerationOutputSchema>;

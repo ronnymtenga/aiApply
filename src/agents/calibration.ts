@@ -69,7 +69,7 @@ async function loadSamples(samplesDir: string): Promise<{ userContent: string; c
 
   if (files.length === 0) {
     throw new Error(
-      `No golden samples found in ${samplesDir}. Add past cover letters, resumes, or writing samples there.`
+      `No documents found in ${samplesDir}.`
     );
   }
 

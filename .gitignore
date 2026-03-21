@@ -7,7 +7,11 @@ state/
 # Ignore personal input files but keep the directories
 inputs/*
 !inputs/.gitkeep
-inputs/golden_samples/*
-!inputs/golden_samples/.gitkeep
+inputs/resumes/*
+!inputs/resumes/.gitkeep
+inputs/cover_letters/*
+!inputs/cover_letters/.gitkeep
+inputs/templates/*
+!inputs/templates/.gitkeep
 inputs/job_postings/*
 !inputs/job_postings/.gitkeep

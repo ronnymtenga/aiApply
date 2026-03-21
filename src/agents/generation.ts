@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { callLLM } from "../utils/llm.js";
+import { z } from "zod";
 import { GenerationOutputSchema, type GenerationOutput } from "../schemas.js";
 import type { TailoringStrategy } from "../schemas.js";
 import type { AuthorStyle } from "../schemas.js";
@@ -54,9 +55,48 @@ export async function runGeneration(
   authorStyle: AuthorStyle,
   profile: UserProfile,
   jobContext: JobContext,
-  outputDir: string
+  outputDir: string,
+  resumeTemplatePath?: string
 ): Promise<GenerationOutput> {
   console.log("\n✍️  Phase 3: Generation — Writing your documents...\n");
+
+  let dynamicSystemPrompt = SYSTEM_PROMPT;
+  let templateContext = "";
+  let dynamicSchema: any = GenerationOutputSchema;
+
+  if (resumeTemplatePath) {
+    dynamicSystemPrompt += `
+    
+## LaTeX Template Injection (CRITICAL REQUIREMENT)
+The user has provided a LaTeX template. You MUST also populate the \`template_variables\` object in your JSON output.
+Find every placeholder like {{SOME_VARIABLE}} in the raw template. Create a key in \`template_variables\` named exactly "SOME_VARIABLE" (without the brackets), and set its value to the pure LaTeX code to be injected.
+CRITICAL: Because you are writing LaTeX inside a JSON string, you MUST double-escape all backslashes! For example, write \\\\textbf instead of \\textbf, and \\\\begin instead of \\begin. Never omit this if the template is provided!
+CRITICAL LENGTH CONSTRAINT: The user strictly requires the compiled LaTeX resume to fit entirely on ONE PAGE. You must aggressively condense bullets, strictly select only the most relevant experiences, and limit text overall so it does not spill over to page 2.`;
+
+    const rawTemplate = fs.readFileSync(resumeTemplatePath, "utf-8");
+    const matches = rawTemplate.match(/\{\{([^}]+)\}\}/g);
+    if (matches) {
+      const keys = matches.map(m => m.replace(/[{}]/g, "").trim());
+      const shape: Record<string, z.ZodString> = {};
+      for (const k of keys) {
+        shape[k] = z.string().describe(`Tailored LaTeX code for ${k}`);
+      }
+      dynamicSchema = GenerationOutputSchema.extend({
+        template_variables: z.object(shape).describe("The dynamically required LaTeX variables found in the template.")
+      });
+    }
+
+    templateContext = `
+## LaTeX Template (Option B)
+The user has provided a blank LaTeX template. It contains placeholder variables like {{SUMMARY}} or {{EXPERIENCE_1}}.
+You MUST output a \`template_variables\` object. The keys must correspond EXACTLY to the variable names inside the brackets (e.g. "SUMMARY"). The values must be the tailored LaTeX code (e.g. "\\\\item Did X resulting in Y") to inject there.
+
+Raw Template:
+\`\`\`latex
+${rawTemplate}
+\`\`\`
+`;
+  }
 
   const userContent = `
 ## Tailoring Strategy
@@ -70,14 +110,15 @@ ${JSON.stringify(profile, null, 2)}
 
 ## Target Job
 ${JSON.stringify(jobContext, null, 2)}
+${templateContext}
 `;
 
   console.log(`  🤖 Generating cover letter and resume...`);
 
   const output = await callLLM({
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: dynamicSystemPrompt,
     userContent,
-    schema: GenerationOutputSchema,
+    schema: dynamicSchema,
     schemaName: "GenerationOutput",
     schemaDescription:
       "The final cover letter (Markdown) and resume content (structured Markdown) tailored for the job",
@@ -94,6 +135,21 @@ ${JSON.stringify(jobContext, null, 2)}
   const resumePath = path.join(outputDir, "resume.md");
   fs.writeFileSync(resumePath, output.resume_content);
   console.log(`  ✅ Resume saved → ${resumePath}`);
+
+  if (resumeTemplatePath && output.template_variables) {
+    let finalTex = fs.readFileSync(resumeTemplatePath, "utf-8");
+    const injectedKeys: string[] = [];
+    for (let [key, value] of Object.entries(output.template_variables)) {
+      // Sometimes the LLM ignores instructions and outputs the key with brackets e.g. "{{SUMMARY}}"
+      key = key.replace(/[{}]/g, "").trim(); 
+      finalTex = finalTex.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value as string);
+      injectedKeys.push(key);
+    }
+    const texOutputPath = path.join(outputDir, "resume.tex");
+    fs.writeFileSync(texOutputPath, finalTex);
+    console.log(`  ✅ LaTeX Resume tailored and saved → ${texOutputPath}`);
+    console.log(`  🔍 Injected variables: ${injectedKeys.join(", ")}`);
+  }
 
   return output;
 }
