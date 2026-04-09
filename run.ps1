@@ -10,13 +10,23 @@ if (-not (Test-Path ".env")) {
     exit 1
 }
 
-$args = @("--job", $job, "--provider", $provider)
-if ($skipCalibration) { $args += "--skip-calibration" }
-if ($dryRun) { $args += "--dry-run" }
+# Parse .env manually to avoid Docker --env-file encoding issues on Windows
+$envArgs = @()
+Get-Content ".env" | ForEach-Object {
+    $line = $_.Trim()
+    if ($line -and -not $line.StartsWith("#")) {
+        $envArgs += "-e"
+        $envArgs += $line
+    }
+}
+
+$appArgs = @("--job", $job, "--provider", $provider)
+if ($skipCalibration) { $appArgs += "--skip-calibration" }
+if ($dryRun) { $appArgs += "--dry-run" }
 
 docker run --rm `
     -v "${PWD}/inputs:/app/inputs" `
     -v "${PWD}/outputs:/app/outputs" `
     -v "${PWD}/state:/app/state" `
-    --env-file .env `
-    ai-apply @args
+    @envArgs `
+    ai-apply @appArgs
