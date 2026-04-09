@@ -16,7 +16,7 @@ const MODEL_MAP: Record<Provider, { fast: string; strong: string }> = {
     strong: "claude-sonnet-4-20250514",
   },
   google: {
-    fast: "gemini-2.0-flash",
+    fast: "gemini-2.5-flash",
     strong: "gemini-2.5-pro",
   },
   openai: {
