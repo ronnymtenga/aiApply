@@ -12,12 +12,12 @@ export type Provider = "anthropic" | "google" | "openai";
 
 const MODEL_MAP: Record<Provider, { fast: string; strong: string }> = {
   anthropic: {
-    fast: "claude-sonnet-4-20250514",
+    fast: "claude-haiku-4-5-20251001",
     strong: "claude-sonnet-4-20250514",
   },
   google: {
-    fast: "gemini-2.5-flash",
-    strong: "gemini-2.5-flash",
+    fast: "gemini-2.0-flash",
+    strong: "gemini-2.5-pro",
   },
   openai: {
     fast: "gpt-4o-mini",
@@ -73,6 +73,7 @@ function getModel(tier: "fast" | "strong") {
 /**
  * Call an LLM and force it to return structured JSON matching a Zod schema.
  * Uses the Vercel AI SDK's `generateObject` under the hood.
+ * Retries up to 3 times with exponential backoff on transient errors.
  */
 export async function callLLM<T extends z.ZodType>(opts: {
   systemPrompt: string;
@@ -82,15 +83,26 @@ export async function callLLM<T extends z.ZodType>(opts: {
   schemaDescription: string;
   model?: "fast" | "strong";
 }): Promise<z.infer<T>> {
-  const { object } = await generateObject({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    model: getModel(opts.model ?? "fast") as any,
-    schema: opts.schema,
-    schemaName: opts.schemaName,
-    schemaDescription: opts.schemaDescription,
-    system: opts.systemPrompt,
-    prompt: opts.userContent,
-  });
-
-  return object;
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const { object } = await generateObject({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        model: getModel(opts.model ?? "fast") as any,
+        schema: opts.schema,
+        schemaName: opts.schemaName,
+        schemaDescription: opts.schemaDescription,
+        system: opts.systemPrompt,
+        prompt: opts.userContent,
+      });
+      return object;
+    } catch (err) {
+      if (attempt === maxAttempts - 1) throw err;
+      const delay = 1000 * 2 ** attempt;
+      console.warn(`  ⚠️  LLM call failed (attempt ${attempt + 1}/${maxAttempts}), retrying in ${delay / 1000}s...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  // Unreachable, but satisfies TypeScript
+  throw new Error("callLLM: exhausted retries");
 }

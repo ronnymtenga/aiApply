@@ -29,7 +29,7 @@ const JOB_POSTINGS_DIR = path.join(INPUTS_DIR, "job_postings");
 const TEMPLATES_DIR = path.join(INPUTS_DIR, "templates");
 const PROFILE_FILE = path.join(INPUTS_DIR, "profile.json");
 const STATE_DIR = path.join(PROJECT_ROOT, "state");
-const OUTPUTS_DIR = path.join(PROJECT_ROOT, "outputs");
+const OUTPUTS_BASE_DIR = path.join(PROJECT_ROOT, "outputs");
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
 const program = new Command();
@@ -68,6 +68,15 @@ const opts = program.opts<{
   dryRun: boolean;
 }>();
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function slugify(str: string): string {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
 // ─── Main Pipeline ──────────────────────────────────────────────────────────
 async function main() {
   const startTime = Date.now();
@@ -96,7 +105,7 @@ async function main() {
 
   // Check if profile exists — if not, we'll auto-extract it from golden samples
   const profileExists = fs.existsSync(PROFILE_FILE);
-  let needsProfileExtraction = !profileExists;
+  const needsProfileExtraction = !profileExists;
 
   // Check golden samples
   let resumesCount = 0;
@@ -115,7 +124,7 @@ async function main() {
     process.exit(1);
   }
 
-  // Load profile if it exists; otherwise mark for extraction
+  // Load profile if it exists
   let profile;
   if (profileExists) {
     const rawProfile = JSON.parse(fs.readFileSync(PROFILE_FILE, "utf-8"));
@@ -159,54 +168,66 @@ async function main() {
     process.exit(1);
   }
 
-  // Ensure state and output directories exist
+  // Ensure state directory exists
   fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
 
-  // ── Phase 0b: Profile Extraction (if needed) ─────────────────────────
+  // ── Phases 0a, 0b, 1 — run in parallel (all independent) ─────────────
+  console.log("\n⚡ Running phases 0a, 0b, and 1 in parallel...");
+
+  const authorStylePath = path.join(STATE_DIR, "author_style.json");
+
+  const calibrationPromise = (async () => {
+    if (opts.skipCalibration && fs.existsSync(authorStylePath)) {
+      console.log("\n⏭️  Skipping Phase 0a (using cached author_style.json)");
+      return JSON.parse(fs.readFileSync(authorStylePath, "utf-8"));
+    } else if (coverLettersCount > 0) {
+      return runCalibration(COVER_LETTERS_DIR, STATE_DIR);
+    } else {
+      console.log("\n📐 Phase 0a: Calibration — No cover letters found. Using default professional style...");
+      return {
+        voice_profile: {
+          tone: "Professional and confident",
+          sentence_structure: "Clear, action-oriented sentences",
+          vocabulary_level: "Standard professional vocabulary",
+          formatting_quirks: "Standard bullet points",
+          common_transitions: ["Additionally", "Furthermore"],
+          forbidden_words: [],
+        },
+        resume_structure_preferences: {
+          bullet_style: "STAR method, action-verb first",
+          section_ordering: ["Summary", "Experience", "Education", "Skills"],
+          metric_usage: "Used to quantify achievements",
+          density: "Balanced and scannable",
+        },
+      };
+    }
+  })();
+
+  const profilePromise = (async () => {
+    if (!needsProfileExtraction) return profile!;
+    return runProfileExtraction(RESUMES_DIR, PROFILE_FILE, STATE_DIR);
+  })();
+
+  const ingestionPromise = runIngestion(jobFile, STATE_DIR);
+
+  const [authorStyle, resolvedProfile, jobContext] = await Promise.all([
+    calibrationPromise,
+    profilePromise,
+    ingestionPromise,
+  ]);
+
+  profile = resolvedProfile;
   if (needsProfileExtraction) {
-    profile = await runProfileExtraction(
-      RESUMES_DIR,
-      PROFILE_FILE,
-      STATE_DIR
-    );
     console.log(`  ✅ Profile auto-extracted: ${profile.name}`);
   }
 
-  // ── Phase 0a: Calibration (Style) ─────────────────────────────────────
-  let authorStyle;
-  const authorStylePath = path.join(STATE_DIR, "author_style.json");
-
-  if (opts.skipCalibration && fs.existsSync(authorStylePath)) {
-    console.log("\n⏭️  Skipping Phase 0a (using cached author_style.json)");
-    authorStyle = JSON.parse(fs.readFileSync(authorStylePath, "utf-8"));
-  } else if (coverLettersCount > 0) {
-    authorStyle = await runCalibration(COVER_LETTERS_DIR, STATE_DIR);
-  } else {
-    console.log("\n📐 Phase 0a: Calibration — No cover letters found. Using default professional style...");
-    authorStyle = {
-      voice_profile: {
-        tone: "Professional and confident",
-        sentence_structure: "Clear, action-oriented sentences",
-        vocabulary_level: "Standard professional vocabulary",
-        formatting_quirks: "Standard bullet points",
-        common_transitions: "Additionally, Furthermore",
-        forbidden_words: "None"
-      },
-      resume_structure_preferences: {
-        bullet_style: "STAR method, action-verb first",
-        section_ordering: "Standard (Experience, Education, Skills)",
-        metric_usage: "Used to quantify achievements",
-        density: "Balanced and scannable"
-      }
-    };
-  }
-
-  // ── Phase 1: Ingestion ────────────────────────────────────────────────
-  const jobContext = await runIngestion(jobFile, STATE_DIR);
+  // ── Create per-job output directory ──────────────────────────────────
+  const jobSlug = slugify(`${jobContext.company_name}_${jobContext.job_title}`);
+  const OUTPUTS_DIR = path.join(OUTPUTS_BASE_DIR, jobSlug);
+  fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
+  console.log(`\n📂 Output directory: outputs/${jobSlug}/`);
 
   // ── Phase 2: Strategy ─────────────────────────────────────────────────
-  // profile is guaranteed to be set — either loaded from file or extracted above
   const strategy = await runStrategy(
     jobContext,
     profile!,
@@ -219,10 +240,10 @@ async function main() {
 
   // ── Phase 3: Generation ───────────────────────────────────────────────
   await runGeneration(
-    strategy, 
-    authorStyle, 
-    profile!, 
-    jobContext, 
+    strategy,
+    authorStyle,
+    profile!,
+    jobContext,
     OUTPUTS_DIR,
     hasTemplate ? resumeTemplatePath : undefined
   );
@@ -235,15 +256,17 @@ async function main() {
     const execAsync = util.promisify(exec);
     try {
       await execAsync(`pdflatex -interaction=nonstopmode -output-directory=${OUTPUTS_DIR} ${path.join(OUTPUTS_DIR, "resume.tex")}`);
-      console.log(`  ✅ Successfully compiled → outputs/resume.pdf`);
-      
+      console.log(`  ✅ Successfully compiled → outputs/${jobSlug}/resume.pdf`);
+
       const auxExts = [".aux", ".log", ".out"];
       for (const ext of auxExts) {
         const auxFile = path.join(OUTPUTS_DIR, `resume${ext}`);
         if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
       }
     } catch (err: any) {
-      console.log(`  ℹ️  Could not auto-compile LaTeX. You may need to compile outputs/resume.tex manually.`);
+      console.log(`  ⚠️  LaTeX compile failed. You may need to compile outputs/${jobSlug}/resume.tex manually.`);
+      if (err.stderr) console.error(`     pdflatex stderr:\n${err.stderr}`);
+      else if (err.message) console.error(`     Error: ${err.message}`);
     }
   }
 
@@ -252,8 +275,8 @@ async function main() {
   console.log("╚══════════════════════════════════════════════╝");
   console.log(`\n  ⏱️  Total time: ${elapsed}s`);
   console.log(`  📂 Outputs:`);
-  console.log(`     → outputs/cover_letter.md`);
-  console.log(`     → outputs/resume.md`);
+  console.log(`     → outputs/${jobSlug}/cover_letter.md`);
+  console.log(`     → outputs/${jobSlug}/resume.md`);
   console.log(`  📂 State (debug):`);
   console.log(`     → state/author_style.json`);
   console.log(`     → state/job_context.json`);

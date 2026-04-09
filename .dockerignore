@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.git/
+outputs/
+state/
+inputs/resumes/
+inputs/cover_letters/
+inputs/job_postings/
+inputs/templates/

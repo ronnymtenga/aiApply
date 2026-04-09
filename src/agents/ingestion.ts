@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { PDFParse } from "pdf-parse";
 import { callLLM } from "../utils/llm.js";
 import { JobContextSchema, type JobContext } from "../schemas.js";
 
@@ -33,7 +34,16 @@ export async function runIngestion(
     throw new Error(`Job posting file not found: ${jobFile}`);
   }
 
-  const jobText = fs.readFileSync(jobFile, "utf-8");
+  let jobText: string;
+  if (jobFile.toLowerCase().endsWith(".pdf")) {
+    const buffer = fs.readFileSync(jobFile);
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    const result = await parser.getText();
+    jobText = result.text;
+    await parser.destroy();
+  } else {
+    jobText = fs.readFileSync(jobFile, "utf-8");
+  }
   console.log(`  📄 Loaded job posting: ${path.basename(jobFile)}`);
   console.log(`  🤖 Extracting structured job context...`);
 

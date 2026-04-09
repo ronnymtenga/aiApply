@@ -54,6 +54,7 @@ Extract the following:
 - **education**: Degrees, schools, and graduation years mentioned
 
 CRITICAL RULES:
+- Match the language used in the samples
 - Only extract facts explicitly stated or strongly implied in the samples
 - Do NOT fabricate data — if something isn't mentioned, use empty strings or omit it
 - Combine information across multiple samples if they reference the same role

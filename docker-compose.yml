@@ -1,0 +1,13 @@
+services:
+  ai-apply:
+    build: .
+    volumes:
+      - ./inputs:/app/inputs
+      - ./outputs:/app/outputs
+      - ./state:/app/state
+    env_file:
+      - .env
+    # Pass --job and other flags here, e.g.:
+    #   command: --job "https://jobs.example.com/some-role" --provider anthropic
+    #   command: --job my_job.md --provider google --skip-calibration
+    command: --help
