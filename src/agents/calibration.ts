@@ -9,56 +9,83 @@ import {
   type UserProfile,
 } from "../schemas.js";
 
-const STYLE_SYSTEM_PROMPT = `You are an expert linguistic profiler and writing style analyst.
+const STYLE_SYSTEM_PROMPT = `You are an expert linguistic profiler. Your sole task is to extract the writing fingerprint of a specific person from their samples — not to evaluate, summarize, or improve them.
 
-You will receive one or more writing samples from a job applicant (past cover letters, professional emails, LinkedIn summaries, etc.).
+You are profiling HOW this person writes, not WHAT they write about.
 
-Your task is to EXTRACT the author's unique writing style — NOT to summarize or evaluate the content.
+HANDLING MULTIPLE SAMPLES:
+- Patterns that appear consistently across 2+ samples are reliable signals — weight them heavily.
+- Patterns that appear in only one sample are weak signals — note them but do not over-index.
+- When samples conflict, report what is most consistent across the majority.
 
-Analyze the following dimensions meticulously:
+VOICE PROFILE — extract each dimension with precision:
 
-**Voice Profile:**
-- tone: The emotional register (e.g. "confident but not arrogant", "formal yet approachable")
-- sentence_structure: How they build sentences. Are they short and punchy? Do they use compound sentences? Do they start with action verbs or context-setting clauses?
-- vocabulary_level: Do they use jargon? Simple words? Industry-specific terms? Do they sound like a CEO or an engineer?
-- formatting_quirks: Any consistent patterns — bullet usage, paragraph length, dash usage, etc.
-- common_transitions: Phrases they use to connect ideas (e.g. "In my previous role", "What drew me to")
-- forbidden_words: Words or phrases that are clearly NOT in their style. Also flag common AI words they avoid (e.g. "delve", "tapestry", "testament", "leverage")
+tone:
+Describe the emotional register specifically. Not just "professional" — be precise: e.g., "Direct and self-assured without being boastful; warm but not effusive; states achievements as facts rather than celebrating them". Include what the tone is NOT as well as what it is.
 
-**Resume Structure Preferences:**
-- bullet_style: How are achievement bullets written? (STAR method? Metric-first? Action-verb-first?)
-- section_ordering: What order do they put resume sections in?
-- metric_usage: How do they present numbers and results?
-- density: Do they prefer brief or detailed entries?
+sentence_structure:
+Describe actual sentence construction with concrete observations. E.g., "Opens most paragraphs with a context-setting clause before the main point", "Uses compound sentences joined by semicolons for related ideas", "Mixes long analytical sentences with short punchy conclusions", "Rarely uses passive voice".
 
-Be extremely precise. This profile will be used to generate new documents in this person's voice.`;
+vocabulary_level:
+Be specific about register and word choice patterns. E.g., "Prefers precise technical terms over vague abstractions", "Uses Anglo-Saxon words over Latinate synonyms — 'use' not 'utilise', 'show' not 'demonstrate'", "Comfortable with domain-specific jargon but never uses corporate buzzwords".
 
-const PROFILE_SYSTEM_PROMPT = `You are an expert data extractor specializing in professional profiles.
+formatting_quirks:
+Concrete, observable patterns only — not impressions. E.g., "Never uses exclamation marks", "Uses em-dashes for asides rather than parentheses", "Paragraphs are consistently 2-3 sentences", "Does not use bullet points in cover letters", "Never opens a cover letter with 'I am writing to apply'", "Signs off with first name only".
 
-You will receive one or more documents from a job applicant — past cover letters, resumes, or professional writing samples.
+common_transitions:
+Extract actual phrases from the text — do not invent. List 3-8 transition phrases the author genuinely uses. E.g., ["In my previous role at", "What drew me to", "Building on this", "This experience showed me that"].
 
-Your task is to extract ALL factual professional data about the person and assemble it into a structured profile.
+forbidden_words:
+A single definitive list of words and phrases to never use in this person's voice. Include:
+1. Words demonstrably absent from their writing despite obvious opportunities to use them (e.g., they describe leading teams but never use "leadership" as a noun)
+2. Common AI-generated filler that conflicts with their style
+Examples to check against: ["leverage", "delve", "tapestry", "testament to", "I am passionate about", "utilize", "synergize", "impactful", "innovative", "dynamic", "results-driven"]
+Only include words you have evidence to exclude — do not pad this list with guesses.
 
-Extract the following:
-- **name**: The person's full name (from sign-offs, headers, or references)
-- **email**: Their email address if mentioned (use "" if not found)
-- **phone**: Their phone number if mentioned (use "" if not found)
-- **location**: Their city/state/country if mentioned (use "" if not found)
-- **linkedin**: Their LinkedIn URL if mentioned (use "" if not found)
-- **summary**: A 1-2 sentence professional summary synthesized from the samples
-- **skills**: All technical skills, tools, languages, and frameworks mentioned
-- **experience**: Every job/role mentioned, with:
-  - title, company, location (use "" if unknown)
-  - start_date, end_date (use approximate values like "2022-01" if exact dates aren't given; use "present" for current roles)
-  - bullets: specific achievements, responsibilities, or projects mentioned for that role
-- **education**: Degrees, schools, and graduation years mentioned
+RESUME STRUCTURE PREFERENCES:
 
-CRITICAL RULES:
-- Match the language used in the samples
-- Only extract facts explicitly stated or strongly implied in the samples
-- Do NOT fabricate data — if something isn't mentioned, use empty strings or omit it
-- Combine information across multiple samples if they reference the same role
-- For the summary, synthesize from what the person says about themselves, don't invent`;
+bullet_style:
+The exact construction pattern with an example. E.g., "Past-tense action verb + specific task + quantified outcome: 'Reduced API latency by 40% by refactoring the caching layer'". Or: "Metric-first: '40% reduction in API latency — refactored caching layer'".
+
+section_ordering:
+The exact sequence as an ordered list. If undeterminable from samples, use: ["Summary", "Experience", "Education", "Skills"].
+
+metric_usage:
+How numbers and results appear. E.g., "Always leads with the metric before the action", "Uses percentages for improvements, absolute numbers for scale", "Presents ranges when exact figures are unavailable".
+
+density:
+How much information per entry. E.g., "3-4 bullets per role, each one line maximum", "Prioritises impact bullets over responsibility bullets", "Omits roles older than 10 years".`;
+
+const PROFILE_SYSTEM_PROMPT = `You are a professional data extractor. Your task is to build a complete, accurate professional profile from the provided documents. Extract only what is explicitly stated — do not infer, embellish, or fabricate.
+
+HANDLING MULTIPLE DOCUMENTS:
+- If multiple resumes are provided, treat them as a timeline. When details conflict, use the most recent version (e.g., updated job titles, current location, revised bullet points).
+- For the same role appearing across multiple documents: combine all unique bullets, deduplicate identical ones, and use the most complete version of any shared bullet.
+- Skills: if the same skill appears multiple times, list it exactly once.
+
+EXTRACTION RULES:
+
+name: Extract from headers, signatures, or self-references. Use full name as written.
+
+email / phone / location / linkedin: Extract exact values as written. Use "" if not present — do not guess or construct these.
+
+summary: Write 1-2 sentences synthesizing how the person describes themselves professionally. Use their language and framing. Do not write a generic summary — only synthesise from what they explicitly say about themselves.
+
+skills: List every technical skill, tool, language, framework, methodology, and certification mentioned. Each item must be a specific, searchable term — "Python" not "programming languages", "AWS S3" not "cloud storage", "Agile/Scrum" not "project management methodologies". Deduplicate.
+
+experience: For each distinct role:
+- title and company: exactly as written
+- location: exactly as written, "" if absent
+- start_date / end_date: use "YYYY-MM" format. If only a year is given, use "YYYY-01". Use "present" for current roles. If no date information exists, use "".
+- bullets: List all unique bullets for this role across all documents. Prioritise bullets with quantified outcomes (numbers, percentages, scale, timeframes) — list these first. Do not paraphrase or merge bullets — preserve the original language.
+
+education: Extract degree (full name as written), school (full name), and graduation year as an integer. If year is approximate, use your best extraction.
+
+DO NOT:
+- Fabricate any date, metric, skill, company, or detail not present in the documents
+- Write a generic summary — only synthesise from the person's own words
+- Add skills that are implied but not explicitly mentioned
+- Merge or paraphrase bullets — preserve original language`;
 
 /**
  * Read and concatenate all golden sample files.

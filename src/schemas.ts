@@ -68,32 +68,36 @@ export type AuthorStyle = z.infer<typeof AuthorStyleSchema>;
 // ─── Phase 1 Output: Job Context ────────────────────────────────────────────
 
 export const JobContextSchema = z.object({
-  job_title: z.string().describe("The title of the job position"),
-  company_name: z.string().describe("The name of the hiring company"),
+  job_title: z.string().describe("The exact job title as written in the posting"),
+  company_name: z.string().describe("The exact company name as written in the posting"),
   company_description: z
     .string()
-    .describe("A brief summary of what the company does and its culture"),
-  location: z.string().describe("Job location (e.g. 'San Francisco, CA (Hybrid)')"),
+    .describe("2-3 sentences: what the company does, its scale/stage, and stated mission — only from posting text, no external knowledge"),
+  location: z.string().describe("Full location string as stated, e.g. 'Munich, Germany (Hybrid — 2 days/week)'"),
   team_or_department: z
     .string()
-    .describe("The team or department the role is in"),
+    .describe("The specific team or department. 'Not specified' if absent."),
   key_responsibilities: z
     .array(z.string())
-    .describe("The main responsibilities listed in the posting"),
+    .describe("Precise, bullet-for-bullet extraction of day-to-day responsibilities — do not summarize or merge distinct items"),
   required_skills: z
     .array(z.string())
-    .describe("Hard skills and technologies explicitly required"),
+    .describe("Skills/technologies marked as required, essential, or mandatory — use exact terminology from the posting for ATS matching"),
   preferred_skills: z
     .array(z.string())
-    .describe("Nice-to-have skills or experience"),
+    .describe("Skills listed as preferred, nice-to-have, or a plus — exclude anything already in required_skills"),
   culture_signals: z
     .array(z.string())
-    .describe(
-      "Inferred cultural values from the posting (e.g. 'values collaboration', 'ships fast')"
-    ),
+    .describe("Specific phrases or patterns from the posting that reveal culture or working style — quote or closely paraphrase, e.g. 'posting repeats ownership and autonomy', 'uses we move fast'"),
   seniority_level: z
     .string()
-    .describe("The seniority level (e.g. 'Senior', 'Mid-level', 'Lead')"),
+    .describe("Seniority level with brief reasoning, e.g. 'Senior — requires 5+ years and mentions leading cross-functional projects'"),
+  remote_policy: z
+    .string()
+    .describe("Work arrangement: 'Remote', 'Hybrid', 'On-site', or 'Not specified'"),
+  salary_range: z
+    .string()
+    .describe("Salary or compensation range exactly as stated, or 'Not specified'"),
 });
 
 export type JobContext = z.infer<typeof JobContextSchema>;
